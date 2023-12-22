@@ -1,9 +1,9 @@
-import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, MintLayout } from '@solana/spl-token';
-import { Connection, PublicKey, Transaction, SystemProgram, Keypair, TransactionInstruction } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, MintLayout, getMinimumBalanceForRentExemptMint, createInitializeMintInstruction, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createMintToInstruction } from '@solana/spl-token';
+import { Connection, PublicKey, Transaction, SystemProgram, Keypair, TransactionInstruction, clusterApiUrl, sendAndConfirmTransaction } from '@solana/web3.js';
 import { WalletContextState } from "@solana/wallet-adapter-react";
 import { Dispatch, SetStateAction } from 'react';
-import { PROGRAM_ID, DataV2, createCreateMetadataAccountV2Instruction } from '@metaplex-foundation/mpl-token-metadata';
-import { bundlrStorage, Metaplex, MetaplexFileTag, walletAdapterIdentity } from '@metaplex-foundation/js';
+import { PROGRAM_ID, DataV2, createCreateMetadataAccountV3Instruction, createMintInstruction  } from '@metaplex-foundation/mpl-token-metadata';
+import { irysStorage, Metaplex, MetaplexFileTag, walletAdapterIdentity } from '@metaplex-foundation/js';
 
 
 
@@ -21,22 +21,22 @@ export async function createSPLToken(owner: PublicKey, wallet: WalletContextStat
     try {
         setIscreating(true)
         setTokenAddresss('')
-
+        
         const metaplex = Metaplex.make(connection)
             .use(walletAdapterIdentity(wallet))
-            .use(bundlrStorage({
-                address: 'https://devnet.bundlr.network',
-                providerUrl: 'https://api.devnet.solana.com',
-                timeout: 60000,
-            }));
+            .use(
+                irysStorage({
+                  address: "https://devnet.irys.xyz", //https://node1.irys.xyz
+                }))
 
-        const mint_rent = await Token.getMinBalanceRentForExemptMint(connection);
+        const mint_rent = await getMinimumBalanceForRentExemptMint(connection)
 
-        const mint_account = Keypair.generate();
+        const mint_account = new Keypair();
 
         let InitMint: TransactionInstruction
+        
 
-        const [metadataPDA] = await PublicKey.findProgramAddress(
+        const [metadataPDA] = await PublicKey.findProgramAddressSync(
             [
                 Buffer.from("metadata"),
                 PROGRAM_ID.toBuffer(),
@@ -103,53 +103,59 @@ export async function createSPLToken(owner: PublicKey, wallet: WalletContextStat
                 programId: TOKEN_PROGRAM_ID,
             });
 
+            console.log('createMintAccountInstruction',createMintAccountInstruction)
+
+            
+
             if (isChecked) {
-                InitMint = await Token.createInitMintInstruction(
-                    TOKEN_PROGRAM_ID,
+                InitMint = await createInitializeMintInstruction(
                     mint_account.publicKey,
                     decimals,
                     owner,
-                    owner
+                    owner,
+                    TOKEN_PROGRAM_ID
                 );
 
             } else {
-                InitMint = await Token.createInitMintInstruction(
-                    TOKEN_PROGRAM_ID,
+                InitMint = await createInitializeMintInstruction(
                     mint_account.publicKey,
                     decimals,
                     owner,
-                    null
+                    null,
+                    TOKEN_PROGRAM_ID
                 );
 
             };
 
-            const associatedTokenAccount = await Token.getAssociatedTokenAddress(
-                ASSOCIATED_TOKEN_PROGRAM_ID,
-                TOKEN_PROGRAM_ID,
+            console.log('createMintAccountInstruction',createMintAccountInstruction)
+
+            const associatedTokenAccount = await getAssociatedTokenAddress(
                 mint_account.publicKey,
                 owner
             );
 
-            const createATAInstruction = await Token.createAssociatedTokenAccountInstruction(
-                ASSOCIATED_TOKEN_PROGRAM_ID,
-                TOKEN_PROGRAM_ID,
-                mint_account.publicKey,
+            console.log('associatedTokenAccount',associatedTokenAccount)
+
+            const createATAInstruction = await createAssociatedTokenAccountInstruction(
+                owner,
                 associatedTokenAccount,
                 owner,
-                owner
+                mint_account.publicKey
             );
 
-            const mintInstruction = await Token.createMintToInstruction(
-                TOKEN_PROGRAM_ID,
+            console.log('createATAInstruction',createATAInstruction)
+
+            const mintInstruction = await createMintToInstruction(
                 mint_account.publicKey,
                 associatedTokenAccount,
                 owner,
-                [],
                 quantity * 10 ** decimals
             );
 
+            console.log('mintInstruction',mintInstruction)
 
-            const MetadataInstruction = createCreateMetadataAccountV2Instruction(
+
+            const MetadataInstruction = createCreateMetadataAccountV3Instruction(
                 {
                     metadata: metadataPDA,
                     mint: mint_account.publicKey,
@@ -158,9 +164,15 @@ export async function createSPLToken(owner: PublicKey, wallet: WalletContextStat
                     updateAuthority: owner,
                 },
                 {
-                    createMetadataAccountArgsV2: args,
+                    createMetadataAccountArgsV3: {
+                      data: tokenMetadata,
+                      isMutable: false,
+                      collectionDetails: null,
+                    },
                 }
             );
+
+            console.log('MetadataInstruction',MetadataInstruction)
 
             const createAccountTransaction = new Transaction().add(createMintAccountInstruction, InitMint, createATAInstruction, mintInstruction, MetadataInstruction);
 
